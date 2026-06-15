@@ -1,129 +1,165 @@
-"""
-This file demonstrates the usage of Pydantic models and FastAPI.
-It includes:
-1. A User model with validation
-2. A Product model with optional fields
-3. A simple FastAPI application with example endpoints
-"""
+from fastapi import FastAPI, HTTPException, status
+from pydantic import BaseModel, Field, EmailStr
+from typing import List
 
 # -----------------------------
-# Imports
+# App Initialization
 # -----------------------------
 
-from pydantic import BaseModel, Field, field_validator
-from typing import Optional
-from fastapi import FastAPI
-
+app = FastAPI(
+    title="Professional FastAPI Demo",
+    description="A robust FastAPI application demonstrating Pydantic v2 validation and full CRUD operations.",
+    version="1.0.0"
+)
 
 # -----------------------------
-# User Model (Pydantic)
+# Pydantic Models
 # -----------------------------
 
 class User(BaseModel):
-    """
-    User model represents a user entity.
+    name: str = Field(min_length=3, max_length=20, examples=["Ahmet"])
+    email: EmailStr = Field(examples=["ahmet@example.com"])
+    age: int = Field(gt=0, le=90, examples=[30])
 
-    Fields:
-    - name: User name (3–20 characters)
-    - mail: Email address (12–50 characters)
-    - yas: Age (must be between 1 and 90)
-    """
-
-    name: str = Field(min_length=3, max_length=20)
-    mail: str = Field(min_length=12, max_length=50)
-    yas: int = Field(gt=0, le=90)
-
-    @field_validator("mail")
-    @classmethod
-    def validate_mail(cls, v):
-        """
-        Custom validator for email field.
-        - Ensures '@' exists in the email
-        - Converts email to lowercase
-        """
-        if "@" not in v:
-            raise ValueError("Geçerli bir mail adresi giriniz")
-        return v.lower()
-
-
-# -----------------------------
-# User Model Usage Example
-# -----------------------------
-
-# Creating a User instance
-me = User(
-    name="ahmet",
-    mail="JDSUDJS   IDJ@gmail.com",
-    yas=45
-)
-
-# Printing the validated and formatted user object
-print(me)
-
-
-# -----------------------------
-# Product Model (Pydantic)
-# -----------------------------
+class UserResponse(User):
+    id: int
 
 class Product(BaseModel):
-    """
-    Product model represents a product entity.
-
-    Fields:
-    - id: Product ID
-    - name: Product name
-    - price: Product price
-    - description: Optional product description
-    - stock: Availability status (default: True)
-    """
-
-    id: int
-    name: str
-    price: float
-    description: Optional[str]
+    name: str = Field(examples=["Gofret"])
+    price: float = Field(gt=0.0, examples=[85.10])
+    description: str | None = Field(default=None, examples=["Amazing gofret"])
     stock: bool = True
 
+class ProductResponse(Product):
+    id: int
 
 # -----------------------------
-# Product Model Usage Example
+# Mock Databases (In-Memory)
 # -----------------------------
 
-myModel = Product(
-    id=154,
-    name="gofret",
-    price=85.1,
-    description="amazing gofret"
-)
-
-print(myModel)
-
+fake_users_db: List[dict] = []
+fake_products_db: List[dict] = []
 
 # -----------------------------
-# FastAPI Application
+# User Endpoints
 # -----------------------------
 
-app = FastAPI()
-
-
-@app.get("/users")
-async def get_users():
+@app.post("/users", response_model=UserResponse, status_code=status.HTTP_201_CREATED, tags=["Users"])
+def create_user(user: User):
     """
-    Returns a list of all users.
+    Register a new user in the system.
     """
-    return {"users": ["Alice", "Bob", "Charlie"]}
+    new_id = len(fake_users_db) + 1
+    user_data = {"id": new_id, **user.model_dump()}
+    fake_users_db.append(user_data)
+    return user_data
 
+@app.get("/users", response_model=List[UserResponse], tags=["Users"])
+def get_users(skip: int = 0, limit: int = 10):
+    """
+    Retrieve a paginated list of all users.
+    """
+    return fake_users_db[skip : skip + limit]
 
-@app.get("/users/{user_id}")
-async def get_user(user_id: int):
+@app.get("/users/{user_id}", response_model=UserResponse, tags=["Users"])
+def get_user_by_id(user_id: int):
     """
-    Returns a specific user by user_id.
+    Retrieve a specific user by their unique ID.
     """
-    return {"user_id": user_id, "name": "Alice"}
+    user = next((u for u in fake_users_db if u["id"] == user_id), None)
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    return user
 
+@app.put("/users/{user_id}", response_model=UserResponse, tags=["Users"])
+def update_user(user_id: int, user_update: User):
+    """
+    Update an existing user's information by ID.
+    """
+    for index, u in enumerate(fake_users_db):
+        if u["id"] == user_id:
+            updated_data = {"id": user_id, **user_update.model_dump()}
+            fake_users_db[index] = updated_data
+            return updated_data
+    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
-@app.get("/search")
-async def search_items(q: str, limit: int = 10):
+@app.delete("/users/{user_id}", status_code=status.HTTP_204_NO_CONTENT, tags=["Users"])
+def delete_user(user_id: int):
     """
-    Searches items based on a query string.
+    Remove a user from the system by ID.
     """
-    return {"query": q, "results": [], "limit": limit}
+    for index, u in enumerate(fake_users_db):
+        if u["id"] == user_id:
+            fake_users_db.pop(index)
+            return None
+    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
+# -----------------------------
+# Product Endpoints
+# -----------------------------
+
+@app.post("/products", response_model=ProductResponse, status_code=status.HTTP_201_CREATED, tags=["Products"])
+def create_product(product: Product):
+    """
+    Add a new product to the inventory.
+    """
+    new_id = len(fake_products_db) + 1
+    product_data = {"id": new_id, **product.model_dump()}
+    fake_products_db.append(product_data)
+    return product_data
+
+@app.get("/products", response_model=List[ProductResponse], tags=["Products"])
+def get_products(skip: int = 0, limit: int = 10):
+    """
+    Retrieve a paginated list of all products.
+    """
+    return fake_products_db[skip : skip + limit]
+
+@app.get("/products/{product_id}", response_model=ProductResponse, tags=["Products"])
+def get_product_by_id(product_id: int):
+    """
+    Retrieve a specific product by its unique ID.
+    """
+    product = next((p for p in fake_products_db if p["id"] == product_id), None)
+    if not product:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product not found")
+    return product
+
+@app.put("/products/{product_id}", response_model=ProductResponse, tags=["Products"])
+def update_product(product_id: int, product_update: Product):
+    """
+    Update an existing product's details by ID.
+    """
+    for index, p in enumerate(fake_products_db):
+        if p["id"] == product_id:
+            updated_data = {"id": product_id, **product_update.model_dump()}
+            fake_products_db[index] = updated_data
+            return updated_data
+    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product not found")
+
+@app.delete("/products/{product_id}", status_code=status.HTTP_204_NO_CONTENT, tags=["Products"])
+def delete_product(product_id: int):
+    """
+    Remove a product from inventory by ID.
+    """
+    for index, p in enumerate(fake_products_db):
+        if p["id"] == product_id:
+            fake_products_db.pop(index)
+            return None
+    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product not found")
+
+# -----------------------------
+# Search/Utility Endpoints
+# -----------------------------
+
+@app.get("/search", tags=["Utilities"])
+def search_items(q: str, limit: int = 10):
+    """
+    Searches items based on a query string (mocked implementation).
+    """
+    # Filter dummy results based on query string from products/users if needed
+    return {
+        "query": q, 
+        "results": [p for p in fake_products_db if q.lower() in p["name"].lower()], 
+        "limit": limit
+    }
